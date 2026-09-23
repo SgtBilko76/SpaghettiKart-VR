@@ -1,3 +1,18 @@
+# SpaghettiKart-VR
+
+SpaghettiKart-VR is a fork of [SpaghettiKart](https://github.com/HarbourMasters/SpaghettiKart) that runs standalone on
+VR headsets: Meta Quest and PICO. It renders the game in true stereoscopic 3D with head tracking, puts the HUD and
+menus on a panel fixed in the room and maps the motion controllers to the N64 pad.
+
+Like SpaghettiKart itself, this repository contains **no copyrighted assets**. You provide your own Mario Kart 64 ROM
+and generate the asset archives from it.
+
+- Building, installing and the control layout: [android/README.md](android/README.md)
+- Downloads: [Releases](https://github.com/SgtBilko76/SpaghettiKart-VR/releases)
+- Everything below is the upstream SpaghettiKart README.
+
+---
+
 ![Spaghetti Kart](docs/spaghettigithublight.png#gh-light-mode-only)
 ![Spaghetti Kart](docs/spaghettigithubnight.png#gh-dark-mode-only)
 
