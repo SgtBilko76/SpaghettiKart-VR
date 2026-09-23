@@ -13,6 +13,12 @@ include(cmake/GetVersion.cmake)
 # Set some Cmake variable
 include(cmake/SetCmakeVar.cmake)
 
+if(ANDROID)
+  # Keep the build machine's absolute paths (which __FILE__ and logging expand) out of the shipped binary
+  add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.
+                      -ffile-prefix-map=${CMAKE_BINARY_DIR}=./build)
+endif()
+
 # add_compile_options(-fsanitize=address) add_link_options(-fsanitize=address)
 
 set(YAML_CPP_STATIC_DEFINE ON)
@@ -36,6 +42,9 @@ if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "YOUR_TEAM_ID")
   set(PROJECT_ID "dev.net64.game")
 endif()
+
+# Stereoscopic VR rendering for Meta Quest (Android only)
+option(ENABLE_OPENXR "Render in VR through OpenXR" OFF)
 
 # Toggle for GLES (Required for many ARM/Mobile platforms)
 option(USE_OPENGLES "Use OpenGLES instead of Desktop OpenGL" OFF)
@@ -126,7 +135,13 @@ if(SPAGHETTIKART_IOS)
 
 endif()
 
-add_executable(${PROJECT_NAME} ${ALL_FILES})
+if(ANDROID)
+  # SDL's Java activity loads the game from libmain.so
+  add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
+  set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
+else()
+  add_executable(${PROJECT_NAME} ${ALL_FILES})
+endif()
 target_include_directories(
   ${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                           ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -219,7 +234,7 @@ add_custom_command(
   VERBATIM)
 endif()
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch" AND NOT ANDROID)
   include(ExternalProject)
   # Torch's pinned spdlog bundles an fmt that trips a consteval error under
   # newer AppleClang (Xcode 16+): "call to consteval function

@@ -44,6 +44,7 @@
 #include "stdio.h"
 #include "port/Engine.h"
 #include "port/Game.h"
+#include "port/vr/VR.h"
 #include "engine/editor/Editor.h"
 
 #include "engine/Matrix.h"
@@ -5306,6 +5307,13 @@ void func_8009CE64(s32 arg0) {
                             break;
                         default:
                             break;
+                    }
+                    // Split-screen doesn't work in VR; show multiplayer demos as single player races instead
+                    if (VR_IsActive() && gPlayerCount > 1) {
+                        gScreenModeSelection = SCREEN_MODE_1P;
+                        gPlayerCountSelection1 = 1;
+                        gPlayerCount = 1;
+                        gModeSelection = GRAND_PRIX;
                     }
                     TrackBrowser_SetTrackFromCup();
                     gNextDemoId += 1;

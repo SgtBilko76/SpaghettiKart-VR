@@ -1,0 +1,121 @@
+diff --git a/include/fast/interpreter.h b/include/fast/interpreter.h
+index 5d87f4ef..265c6e36 100644
+--- a/include/fast/interpreter.h
++++ b/include/fast/interpreter.h
+@@ -11,6 +11,7 @@
+ #include <string>
+ #include <string_view>
+ #include <memory>
++#include <functional>
+ 
+ #include "fast/lus_gbi.h"
+ #include "fast/types.h"
+@@ -553,6 +554,19 @@ class Interpreter {
+     // 0 = previous tick, 1 = current tick. Set by the port before each
+     // DrawAndRunGraphicsCommands call, like mInterpolationIndex.
+     float mInterpolationT = 1.0f;
++
++    // Stereo (VR) rendering support. When a projection matrix is loaded, the hook may rewrite it in
++    // place and classifies it. 2D geometry drawn with a Panel projection, and all rectangles, is then
++    // reprojected from its clip-space (x, y, w) through panelMatrix, which places it on a panel in 3D space.
++    enum class StereoProjection { Perspective, Panel, Fullscreen };
++    struct StereoParams {
++        bool enabled = false;
++        std::function<StereoProjection(float matrix[4][4])> projectionHook;
++        // Rows produce clip x, y and w; columns take clip x, y and w
++        float panelMatrix[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
++    } mStereo;
++    StereoProjection mStereoProjection = StereoProjection::Perspective;
++    void ApplyStereoPanel(float& x, float& y, float& z, float& w) const;
+ };
+ 
+ void gfx_set_target_ucode(UcodeHandlers ucode);
+diff --git a/src/fast/interpreter.cpp b/src/fast/interpreter.cpp
+index 04dff040..ce233d39 100644
+--- a/src/fast/interpreter.cpp
++++ b/src/fast/interpreter.cpp
+@@ -1490,6 +1490,9 @@ void Interpreter::GfxSpMatrix(uint8_t parameters, const int32_t* addr) {
+ 
+     if (parameters & mtx_projection) {
+         if (parameters & mtx_load) {
++            if (mStereo.enabled && mStereo.projectionHook && !mFbActive) {
++                mStereoProjection = mStereo.projectionHook(matrix);
++            }
+             memcpy(mRsp->P_matrix, matrix, sizeof(matrix));
+         } else {
+             MatrixMul(mRsp->P_matrix, matrix, mRsp->P_matrix);
+@@ -1526,6 +1529,18 @@ void Interpreter::GfxSpPopMatrix(uint32_t count) {
+     mRsp->lights_changed = true;
+ }
+ 
++void Interpreter::ApplyStereoPanel(float& x, float& y, float& z, float& w) const {
++    const auto& m = mStereo.panelMatrix;
++    const float newX = m[0][0] * x + m[0][1] * y + m[0][2] * w;
++    const float newY = m[1][0] * x + m[1][1] * y + m[1][2] * w;
++    const float newW = m[2][0] * x + m[2][1] * y + m[2][2] * w;
++    // Keep the original normalized depth
++    z = w != 0.0f ? z / w * newW : z;
++    x = newX;
++    y = newY;
++    w = newW;
++}
++
+ float Interpreter::AdjXForAspectRatio(float x) const {
+     // Skip widescreen adjustment for fixed-size off-screen FBs (HUD elements,
+     // small capture buffers), or those which specify a fixed aspect ratio.
+@@ -1579,6 +1594,9 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
+         }
+ 
+         x = AdjXForAspectRatio(x);
++        if (mStereo.enabled && !mFbActive && mStereoProjection == StereoProjection::Panel) {
++            ApplyStereoPanel(x, y, z, w);
++        }
+ 
+         short U = v->tc[0] * mRsp->texture_scaling_factor.s >> 16;
+         short V = v->tc[1] * mRsp->texture_scaling_factor.t >> 16;
+@@ -2814,25 +2832,18 @@ void Interpreter::GfxDrawRectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_
+     struct LoadedVertex* lr = &mRsp->loaded_vertices[MAX_VERTICES + 2];
+     struct LoadedVertex* ur = &mRsp->loaded_vertices[MAX_VERTICES + 3];
+ 
+-    ul->x = ulxf;
+-    ul->y = ulyf;
+-    ul->z = -1.0f;
+-    ul->w = 1.0f;
+-
+-    ll->x = ulxf;
+-    ll->y = lryf;
+-    ll->z = -1.0f;
+-    ll->w = 1.0f;
+-
+-    lr->x = lrxf;
+-    lr->y = lryf;
+-    lr->z = -1.0f;
+-    lr->w = 1.0f;
+-
+-    ur->x = lrxf;
+-    ur->y = ulyf;
+-    ur->z = -1.0f;
+-    ur->w = 1.0f;
++    const float corners[4][2] = { { ulxf, ulyf }, { ulxf, lryf }, { lrxf, lryf }, { lrxf, ulyf } };
++    struct LoadedVertex* cornerVertices[4] = { ul, ll, lr, ur };
++    for (int i = 0; i < 4; i++) {
++        struct LoadedVertex* v = cornerVertices[i];
++        v->x = corners[i][0];
++        v->y = corners[i][1];
++        v->z = -1.0f;
++        v->w = 1.0f;
++        if (mStereo.enabled && !mFbActive) {
++            ApplyStereoPanel(v->x, v->y, v->z, v->w);
++        }
++    }
+ 
+     // The coordinates for texture rectangle shall bypass the viewport setting
+     struct XYWidthHeight default_viewport;
+@@ -5097,6 +5108,7 @@ void Interpreter::RunGuiOnly() {
+ 
+ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_replacements) {
+     SpReset();
++    mStereoProjection = StereoProjection::Perspective;
+ 
+     mGetPixelDepthPending.clear();
+     mGetPixelDepthCached.clear();

@@ -23,6 +23,7 @@
 #include <sounds.h>
 #include "spawn_players.h"
 #include "port/Game.h"
+#include "port/vr/VR.h"
 
 /** BSS **/
 s32 gIntroModelZEye;
@@ -1314,7 +1315,12 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                 break;
             }
             case MAIN_MENU_PLAYER_SELECT: {
-                if ((btnAndStick & R_JPAD) && gPlayerCount < 4) {
+                // Split-screen doesn't work in VR, so only single player can be selected there
+                s8 maxPlayers = VR_IsActive() ? 1 : 4;
+                if (gPlayerCount > maxPlayers) {
+                    gPlayerCount = maxPlayers;
+                }
+                if ((btnAndStick & R_JPAD) && gPlayerCount < maxPlayers) {
                     gPlayerCount += 1;
                     reset_cycle_flash_menu();
                     play_sound2(SOUND_MENU_CURSOR_MOVE);

@@ -34,6 +34,7 @@
 #include "engine/TrackBrowser.h"
 #include "engine/RandomItemTable.h"
 #include "engine/sky/Sky.h"
+#include "port/vr/VR.h"
 
 #ifdef _WIN32
 #include <locale.h>
@@ -569,7 +570,14 @@ void CM_DrawParticles(s32 cameraId) {
 
 void CM_RaceDrawSky(ScreenContext* screen, s32 someId) {
     // if (bDrawSkybox) {
-    if (CVarGetInteger("gDrawSky", true) == true) {
+    if (CVarGetInteger("gDrawSky", true) == true && VR_IsActive()) {
+        // The flat sky and its 2D clouds would follow the player's head in VR
+        for (auto& gameCamera : GetWorld()->Cameras) {
+            if (screen->camera == gameCamera->Get()) {
+                Sky::Instance->DrawVR(screen, gameCamera->GetPerspMatrix(), gameCamera->GetLookAtMatrix());
+            }
+        }
+    } else if (CVarGetInteger("gDrawSky", true) == true) {
         Sky::Instance->Draw(screen);
         if (gGamestate != CREDITS_SEQUENCE) {
             func_80057FC4(screen, someId); // DrawSkyActors

@@ -27,6 +27,7 @@
 #include "engine/tracks/Track.h"
 
 #include "enhancements/collision_viewer.h"
+#include "port/vr/VR.h"
 
 s16 gFogMin = 995;
 s16 gFogMax = 1000;
@@ -88,6 +89,45 @@ void parse_track_displaylists(TrackSections* asset) {
 
 extern u32 isFlycam;
 
+// The heading the track sections are chosen for. In VR this is where the player's head faces, which
+// can be far off the game camera's heading; each section only has the geometry visible in one direction.
+static u16 get_view_yaw(Camera* camera) {
+    f32 head[3];
+    if (!VR_GetHeadForward(head)) {
+        return (u16) camera->rot[1];
+    }
+
+    // Camera basis from its lookAt, as guLookAt builds it: forward, right and up
+    f32 forward[3] = { camera->lookAt[0] - camera->pos[0], camera->lookAt[1] - camera->pos[1],
+                       camera->lookAt[2] - camera->pos[2] };
+    f32 len = sqrtf(forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]);
+    if (len == 0.0f) {
+        return (u16) camera->rot[1];
+    }
+    forward[0] /= len;
+    forward[1] /= len;
+    forward[2] /= len;
+    f32 right[3] = { forward[1] * camera->up[2] - forward[2] * camera->up[1],
+                     forward[2] * camera->up[0] - forward[0] * camera->up[2],
+                     forward[0] * camera->up[1] - forward[1] * camera->up[0] };
+    len = sqrtf(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+    if (len == 0.0f) {
+        return (u16) camera->rot[1];
+    }
+    right[0] /= len;
+    right[1] /= len;
+    right[2] /= len;
+    f32 up[3] = { right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2],
+                  right[0] * forward[1] - right[1] * forward[0] };
+
+    // Camera space has -z forward
+    f32 dir[3];
+    for (s32 i = 0; i < 3; i++) {
+        dir[i] = right[i] * head[0] + up[i] * head[1] - forward[i] * head[2];
+    }
+    return atan2s(dir[0], dir[2]);
+}
+
 void render_track_sections(const char* addr[], ScreenContext* arg1) {
     Player* player = arg1->player;
     Camera* camera = arg1->camera;
@@ -96,8 +136,9 @@ void render_track_sections(const char* addr[], ScreenContext* arg1) {
     s16 sp1E;
     s16 temp_v0_3;
     u16 rot;
+    u16 viewYaw = get_view_yaw(camera);
     if (gIsMirrorMode) {
-        rot = (u16) camera->rot[1];
+        rot = viewYaw;
         if (rot < 0x2000) {
             direction = SOUTH;
         } else if (rot < 0x6000) {
@@ -110,7 +151,7 @@ void render_track_sections(const char* addr[], ScreenContext* arg1) {
             direction = SOUTH;
         }
     } else {
-        rot = (u16) camera->rot[1];
+        rot = viewYaw;
         if (rot < 0x2000) {
             direction = SOUTH;
         } else if (rot < 0x6000) {

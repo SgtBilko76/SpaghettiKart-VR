@@ -275,6 +275,98 @@ void Sky::DrawFloor(ScreenContext* screen) { // func_802A487C
     gSP2Triangles(gDisplayListHead++, 0, 3, 1, 0, 1, 3, 2, 0);
 }
 
+void Sky::DrawVR(ScreenContext* screen, Mtx* perspective, Mtx* lookAt) {
+    Vtx* vtx;
+    switch (screen - gScreenContexts) {
+        case 1:
+            vtx = mSkyboxScreenTwo;
+            break;
+        case 2:
+            vtx = mSkyboxScreenThree;
+            break;
+        case 3:
+            vtx = mSkyboxScreenFour;
+            break;
+        default:
+            vtx = mSkyboxScreenOne;
+            break;
+    }
+    this->SetColours(vtx);
+
+    // The flat sky is a gradient from the top of the screen down to the horizon, then the ground colour
+    // (or, on Rainbow Road, more sky) down to the bottom. Map it onto elevation angles instead, from
+    // straight down to straight up, with the horizon level with the world.
+    auto average = [](const Vtx& a, const Vtx& b, u8 out[4]) {
+        for (int i = 0; i < 3; i++) {
+            out[i] = (a.v.cn[i] + b.v.cn[i]) / 2;
+        }
+        out[3] = 0xFF;
+    };
+    u8 top[4], skyHorizon[4], groundHorizon[4], bottom[4];
+    average(vtx[0], vtx[3], top);
+    average(vtx[1], vtx[2], skyHorizon);
+    average(vtx[4], vtx[7], groundHorizon);
+    average(vtx[5], vtx[6], bottom);
+
+    // Elevations in degrees; the gradients span roughly what the original camera shows
+    struct Ring {
+        f32 elevation;
+        const u8* colour;
+    };
+    const Ring bands[kDomeBands][2] = {
+        { { -90.0f, bottom }, { -25.0f, bottom } },
+        { { -25.0f, bottom }, { 0.0f, groundHorizon } },
+        { { 0.0f, skyHorizon }, { 25.0f, top } },
+        { { 25.0f, top }, { 90.0f, top } },
+    };
+
+    // Between the near and far planes, and within the range of vertex coordinates
+    const f32 radius = MIN(CM_GetProps()->FarPersp * 0.5f, 30000.0f);
+    for (int band = 0; band < kDomeBands; band++) {
+        for (int chunk = 0; chunk < kDomeSegments / kDomeChunkSegments; chunk++) {
+            for (int row = 0; row < 2; row++) {
+                const Ring& ring = bands[band][row];
+                const f32 elevation = ring.elevation * M_PI / 180.0f;
+                for (int col = 0; col <= kDomeChunkSegments; col++) {
+                    const f32 azimuth = (chunk * kDomeChunkSegments + col) * 2.0f * M_PI / kDomeSegments;
+                    Vtx* v = &mDomeVtx[band][chunk][row * (kDomeChunkSegments + 1) + col];
+                    v->v.ob[0] = (s16) (radius * cosf(elevation) * cosf(azimuth));
+                    v->v.ob[1] = (s16) (radius * sinf(elevation));
+                    v->v.ob[2] = (s16) (radius * cosf(elevation) * sinf(azimuth));
+                    v->v.flag = 0;
+                    v->v.tc[0] = v->v.tc[1] = 0;
+                    for (int i = 0; i < 4; i++) {
+                        v->v.cn[i] = ring.colour[i];
+                    }
+                }
+            }
+        }
+    }
+
+    // Centered on the camera, so only the camera's rotation (and the player's head) moves it
+    Camera* camera = screen->camera;
+    guTranslate(&mDomeMatrix, camera->pos[0], camera->pos[1], camera->pos[2]);
+
+    init_rdp();
+    gDPSetRenderMode(gDisplayListHead++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
+    gSPClearGeometryMode(gDisplayListHead++, G_ZBUFFER | G_LIGHTING | G_CULL_BOTH);
+    gSPSetGeometryMode(gDisplayListHead++, G_SHADE | G_SHADING_SMOOTH);
+    gSPMatrix(gDisplayListHead++, perspective, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    gSPMatrix(gDisplayListHead++, lookAt, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+    gSPMatrix(gDisplayListHead++, &mDomeMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+
+    const int rowLength = kDomeChunkSegments + 1;
+    for (int band = 0; band < kDomeBands; band++) {
+        for (int chunk = 0; chunk < kDomeSegments / kDomeChunkSegments; chunk++) {
+            gSPVertex(gDisplayListHead++, (uintptr_t) mDomeVtx[band][chunk], 2 * rowLength, 0);
+            for (int col = 0; col < kDomeChunkSegments; col++) {
+                gSP2Triangles(gDisplayListHead++, col, col + 1, rowLength + col + 1, 0, col, rowLength + col + 1,
+                              rowLength + col, 0);
+            }
+        }
+    }
+}
+
 void Sky::InitActors(ScreenContext* screen) {
     size_t iterations = 0;
     size_t numSnow = 0;

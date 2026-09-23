@@ -666,6 +666,7 @@ void render_palm_trees(Camera* camera, Mat4 arg1) {
         test = var_s1->someId;
         if (test & 0x0800) {
             var_s1++;
+            i++;
             continue;
         }
 
@@ -682,7 +683,9 @@ void render_palm_trees(Camera* camera, Mat4 arg1) {
         if (is_within_render_distance(camera->pos, spD4, camera->rot[1], 0.0f, camera->fieldOfView, var_f22) <
                 0.0f &&
             CVarGetInteger("gNoCulling", 0) == 0) {
+            // Count skipped trees too, so each tree keeps the same interpolation tag while others are culled
             var_s1++;
+            i++;
             continue;
         }
         FrameInterpolation_RecordOpenChild("render_palm_tree", TAG_ITEM_ADDR((i << 4) | (camera - cameras)));

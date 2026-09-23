@@ -9,6 +9,7 @@
 #include "memory.h"
 #include "engine/Matrix.h"
 #include "port/Game.h"
+#include "port/vr/VR.h"
 #include <port/interpolation/FrameInterpolation.h>
 #include <port/interpolation/matrix.h>
 s32 D_802B91C0[2] = { 13, 13 };
@@ -1139,8 +1140,12 @@ f32 is_within_render_distance(Vec3f cameraPos, Vec3f objectPos, u16 orientationY
     minus_fov_angle = (s32)orientationY - (s32)extended_fov;
     plus_fov_angle = (s32)orientationY + (s32)extended_fov;
 
+    // In VR the player sees far beyond the game camera's field of view, and can turn their head, so only
+    // cull by distance there. Otherwise objects near the edge of the view keep popping in and out.
+    bool inView = VR_IsActive() || is_visible_between_angle(plus_fov_angle, minus_fov_angle, angleObject) == 1;
+
     if (minDistance == 0.0f) {
-        if (is_visible_between_angle(plus_fov_angle, minus_fov_angle, angleObject) == 1) {
+        if (inView) {
             if (IsKalimariDesert()) {
                 return distance / 6.5f; // set for better DD settings in Desert
             } else {
@@ -1150,7 +1155,7 @@ f32 is_within_render_distance(Vec3f cameraPos, Vec3f objectPos, u16 orientationY
         return -1.0f;
     }
 
-    if (is_visible_between_angle((u16) plus_fov_angle, (u16) minus_fov_angle, angleObject) == 1) {
+    if (inView) {
         if (IsKalimariDesert()) {
             return distance / 2.0f;
         } else {

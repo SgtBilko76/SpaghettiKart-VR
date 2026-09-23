@@ -33,6 +33,7 @@
 #include "SpaghettiGui.h"
 
 #include "port/interpolation/FrameInterpolation.h"
+#include "port/vr/VRSession.h"
 #include <fast/Fast3dWindow.h>
 #include <fast/interpreter.h>
 // #include <Fast3D/gfx_rendering_api.h>
@@ -181,7 +182,14 @@ GameEngine::GameEngine() {
     gui->AddGuiWindow(std::make_shared<LUS::InputEditorWindow>(CVAR_CONTROLLER_CONFIGURATION_WINDOW_OPEN, "Input Editor"));
     gui->AddGuiWindow(std::make_shared<LUS::GfxDebuggerWindow>(CVAR_GFX_DEBUGGER_WINDOW_OPEN, "GfxDebuggerWindow", ImVec2(520, 600)));
 
-    this->context->Init({assets_path}, {}, 3, { 26800, 512, 1100 }, wnd, controlDeck);
+#ifdef __ANDROID__
+    // Game ticks follow the headset's frame pacing, so they arrive less evenly than on desktop. Keep more
+    // audio queued so the output doesn't run dry between ticks (heard as crackling).
+    const Ship::AudioSettings audioSettings = { 26800, 1024, 2200 };
+#else
+    const Ship::AudioSettings audioSettings = { 26800, 512, 1100 };
+#endif
+    this->context->Init({assets_path}, {}, 3, audioSettings, wnd, controlDeck);
 
 #ifndef __SWITCH__
     Ship::Context::GetRawInstance()->GetLogger()->set_level(
@@ -294,6 +302,10 @@ bool GameEngine::GenAssetFile() {
 }
 
 uint32_t GameEngine::GetInterpolationFPS() {
+    if (VR::IsActive()) {
+        // One interpolated frame per headset refresh keeps the game at full speed
+        return VR::GetRefreshRate();
+    }
     if (CVarGetInteger("gMatchRefreshRate", 0)) {
         return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
 
@@ -413,6 +425,10 @@ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx
 
     interpreter->mInterpolationIndex = 0;
 
+    if (VR::RunCommands(interpreter, pool, mtx_replacements)) {
+        return;
+    }
+
     for (const auto& mtxStack : mtx_replacements) {
         wnd->DrawAndRunGraphicsCommands(pool, mtxStack);
         interpreter->mInterpolationIndex++;
@@ -496,23 +512,28 @@ void GameEngine::HandleAudioThread() {
         int samples_left = AudioPlayerBuffered();
         u32 num_audio_samples = samples_left < AudioPlayerGetDesiredBuffered() ? SAMPLES_HIGH : SAMPLES_LOW;
 
-        s16 nas_buffer[SAMPLES_PER_FRAME] = { 0 };
-        f32 hmas_buffer[SAMPLES_PER_FRAME] = { 0 };
-        s16 mix_buffer[SAMPLES_PER_FRAME] = { 0 };
+        // Each tick can only produce slightly more audio than is played back, so after a hitch the queue
+        // would take many seconds to refill and keep running dry (heard as crackling). Catch up at once.
+        const int passes = samples_left < AudioPlayerGetDesiredBuffered() / 2 ? 2 : 1;
+        for (int pass = 0; pass < passes; pass++) {
+            s16 nas_buffer[SAMPLES_PER_FRAME] = { 0 };
+            f32 hmas_buffer[SAMPLES_PER_FRAME] = { 0 };
+            s16 mix_buffer[SAMPLES_PER_FRAME] = { 0 };
 
-        for (size_t i = 0; i < NUM_AUDIO_CHANNELS; i++) {
-            create_next_audio_buffer(nas_buffer + i * (num_audio_samples * 2), num_audio_samples);
+            for (size_t i = 0; i < NUM_AUDIO_CHANNELS; i++) {
+                create_next_audio_buffer(nas_buffer + i * (num_audio_samples * 2), num_audio_samples);
+            }
+
+            GameEngine::Instance->gHMAS->CreateBuffer((u8*)hmas_buffer, 4 * num_audio_samples * sizeof(float));
+
+            float master_vol = CVarGetFloat("gGameMasterVolume", 1.0f);
+
+            for (size_t i = 0; i < SAMPLES_PER_FRAME; i++) {
+                mix_buffer[i] = nas_buffer[i] + ((int16_t)(hmas_buffer[i] * 32767.0f) * master_vol);
+            }
+
+            AudioPlayerPlayFrame((u8*) mix_buffer, 2 * num_audio_samples * 4);
         }
-
-        GameEngine::Instance->gHMAS->CreateBuffer((u8*)hmas_buffer, 4 * num_audio_samples * sizeof(float));
-
-        float master_vol = CVarGetFloat("gGameMasterVolume", 1.0f);
-
-        for (size_t i = 0; i < SAMPLES_PER_FRAME; i++) {
-            mix_buffer[i] = nas_buffer[i] + ((int16_t)(hmas_buffer[i] * 32767.0f) * master_vol);
-        }
-
-        AudioPlayerPlayFrame((u8*) mix_buffer, 2 * num_audio_samples * 4);
 
         audio.processing = false;
         audio.cv_from_thread.notify_one();
@@ -780,6 +801,11 @@ extern "C" void Timer_SetValue(int32_t* address, int32_t value) {
 }
 
 extern "C" float OTRGetAspectRatio() {
+    if (VR::IsActive()) {
+        // The VR render target is each eye's nearly square image, which would crowd the HUD into the
+        // middle. Lay the HUD out for a wider panel instead.
+        return CVarGetFloat("gVR.HudAspectRatio", 16.0f / 10.0f);
+    }
     return GetInterpreter()->mCurDimensions.aspect_ratio;
 }
 
