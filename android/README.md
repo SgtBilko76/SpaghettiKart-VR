@@ -35,6 +35,8 @@ package name.
 
 ## Controls
 
+![SpaghettiKart-VR controller mapping](../docs/controls.webp)
+
 PICO controllers use the same layout as Touch controllers.
 
 | Controller | N64 | In game |
