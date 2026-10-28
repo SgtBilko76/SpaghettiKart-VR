@@ -1,5 +1,7 @@
 # SpaghettiKart-VR
 
+**Download, install guide, controls and pictures: [portroyale.online/spaghettikart.html](https://portroyale.online/spaghettikart.html)**
+
 A standalone headset build of Spaghetti Kart with stereoscopic 3D: the track is rendered for each eye with
 head tracking, while the HUD and menus sit on a panel in front of you. Built on OpenXR, so one APK covers
 Meta Horizon OS and PICO OS.
